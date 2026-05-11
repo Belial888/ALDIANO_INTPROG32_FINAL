@@ -2,201 +2,201 @@ import javax.swing.*;
 import java.awt.*;
 import java.io.*;
 import java.net.*;
+import java.util.*;
 
-public class ChatClient extends JFrame {
+public class ChatServer extends JFrame {
 
-    private JTextArea chatArea;
-    private JTextField messageField;
-    private JButton sendButton;
-    private JComboBox<String> userDropdown;
+    private static final int PORT = 8000;
+
+    private JTextArea chatMonitor;
     private JLabel statusLabel;
-    private JLabel serverInfoLabel;
+    private DefaultListModel<String> userListModel;
 
-    private Socket socket;
-    private BufferedReader input;
-    private PrintWriter output;
+    private static final Map<String, ClientHandler> clients = new HashMap<>();
 
-    private String username;
-
-    private final String SERVER_IP = "localhost";
-    private final int SERVER_PORT = 5000;
-
-    public ChatClient() {
-        username = JOptionPane.showInputDialog(this, "Enter username:");
-
-        if (username == null || username.trim().isEmpty()) {
-            username = "Anonymous" + System.currentTimeMillis();
-        }
-
-        setupWindow();
-        setupComponents();
-        connectToServer();
-
-        setVisible(true);
-    }
-
-    private void setupWindow() {
-        setTitle("Chat App - " + username);
-        setSize(650, 600);
+    public ChatServer() {
+        setTitle("Chat Server Monitor");
+        setSize(700, 500);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        getContentPane().setBackground(new Color(245, 247, 250));
-        setLayout(new BorderLayout(10, 10));
-    }
 
-    private void setupComponents() {
-        Font mainFont = new Font("Segoe UI", Font.PLAIN, 14);
-        Font titleFont = new Font("Segoe UI", Font.BOLD, 18);
+        chatMonitor = new JTextArea();
+        chatMonitor.setEditable(false);
 
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(new Color(37, 99, 235));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
+        JScrollPane scrollPane = new JScrollPane(chatMonitor);
 
-        JLabel titleLabel = new JLabel("Group Chat");
-        titleLabel.setFont(titleFont);
-        titleLabel.setForeground(Color.WHITE);
+        statusLabel = new JLabel("Server Status: Offline");
 
-        statusLabel = new JLabel("Disconnected");
-        statusLabel.setFont(mainFont);
-        statusLabel.setForeground(Color.WHITE);
+        userListModel = new DefaultListModel<>();
+        JList<String> onlineUsers = new JList<>(userListModel);
 
-        serverInfoLabel = new JLabel("Server: " + SERVER_IP + " | Port: " + SERVER_PORT);
-        serverInfoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        serverInfoLabel.setForeground(new Color(220, 230, 255));
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.add(new JLabel("Online Users"), BorderLayout.NORTH);
+        rightPanel.add(new JScrollPane(onlineUsers), BorderLayout.CENTER);
 
-        JPanel statusPanel = new JPanel(new GridLayout(2, 1));
-        statusPanel.setOpaque(false);
-        statusPanel.add(statusLabel);
-        statusPanel.add(serverInfoLabel);
-
-        headerPanel.add(titleLabel, BorderLayout.WEST);
-        headerPanel.add(statusPanel, BorderLayout.EAST);
-
-        chatArea = new JTextArea();
-        chatArea.setEditable(false);
-        chatArea.setFont(mainFont);
-        chatArea.setLineWrap(true);
-        chatArea.setWrapStyleWord(true);
-        chatArea.setBackground(Color.WHITE);
-        chatArea.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
-
-        JScrollPane scrollPane = new JScrollPane(chatArea);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
-
-        JPanel bottomPanel = new JPanel(new BorderLayout(10, 10));
-        bottomPanel.setBackground(new Color(245, 247, 250));
-        bottomPanel.setBorder(BorderFactory.createEmptyBorder(10, 15, 15, 15));
-
-        userDropdown = new JComboBox<>();
-        userDropdown.addItem("All");
-        userDropdown.setFont(mainFont);
-        userDropdown.setPreferredSize(new Dimension(130, 40));
-
-        messageField = new JTextField();
-        messageField.setFont(mainFont);
-        messageField.setPreferredSize(new Dimension(300, 40));
-        messageField.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(210, 210, 210)),
-                BorderFactory.createEmptyBorder(8, 10, 8, 10)
-        ));
-
-        sendButton = new JButton("Send");
-        sendButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        sendButton.setBackground(new Color(37, 99, 235));
-        sendButton.setForeground(Color.WHITE);
-        sendButton.setFocusPainted(false);
-        sendButton.setPreferredSize(new Dimension(90, 40));
-
-        bottomPanel.add(userDropdown, BorderLayout.WEST);
-        bottomPanel.add(messageField, BorderLayout.CENTER);
-        bottomPanel.add(sendButton, BorderLayout.EAST);
-
-        add(headerPanel, BorderLayout.NORTH);
+        add(statusLabel, BorderLayout.NORTH);
         add(scrollPane, BorderLayout.CENTER);
-        add(bottomPanel, BorderLayout.SOUTH);
+        add(rightPanel, BorderLayout.EAST);
 
-        sendButton.addActionListener(e -> sendMessage());
-        messageField.addActionListener(e -> sendMessage());
+        setVisible(true);
+        startServer();
     }
 
-    private void connectToServer() {
-        try {
-            socket = new Socket(SERVER_IP, SERVER_PORT);
+    private void startServer() {
+        new Thread(() -> {
+            try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+                log("Server started on port " + PORT);
+                statusLabel.setText("Server Status: Online");
 
-            input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            output = new PrintWriter(socket.getOutputStream(), true);
-
-            output.println(username);
-
-            statusLabel.setText("Connected to server");
-            chatArea.append("Connected to server.\n");
-
-            Thread receiveThread = new Thread(() -> {
-                try {
-                    String message;
-
-                    while ((message = input.readLine()) != null) {
-                        if (message.startsWith("USERLIST:")) {
-                            updateUserDropdown(message);
-                        } else {
-                            chatArea.append(message + "\n");
-                        }
-                    }
-
-                } catch (IOException e) {
-                    statusLabel.setText("Disconnected");
-                    chatArea.append("Disconnected from server.\n");
+                while (true) {
+                    Socket socket = serverSocket.accept();
+                    ClientHandler client = new ClientHandler(socket);
+                    client.start();
                 }
-            });
 
-            receiveThread.start();
-
-        } catch (IOException e) {
-            statusLabel.setText("Disconnected");
-            JOptionPane.showMessageDialog(this, "Cannot connect to server.");
-        }
+            } catch (IOException e) {
+                log("Server error: " + e.getMessage());
+                statusLabel.setText("Server Status: Offline");
+            }
+        }).start();
     }
 
-    private void updateUserDropdown(String message) {
+    private void log(String message) {
+        SwingUtilities.invokeLater(() -> chatMonitor.append(message + "\n"));
+    }
+
+    private void updateUserList() {
         SwingUtilities.invokeLater(() -> {
-            userDropdown.removeAllItems();
-            userDropdown.addItem("All");
+            userListModel.clear();
 
-            String users = message.substring("USERLIST:".length());
-
-            if (!users.isEmpty()) {
-                String[] userList = users.split(",");
-
-                for (String user : userList) {
-                    user = user.trim();
-
-                    if (!user.isEmpty() && !user.equals(username)) {
-                        userDropdown.addItem(user);
-                    }
+            synchronized (clients) {
+                for (String user : clients.keySet()) {
+                    userListModel.addElement(user);
                 }
             }
         });
     }
 
-    private void sendMessage() {
-        String message = messageField.getText().trim();
+    private void sendUserListToClients() {
+        synchronized (clients) {
+            StringBuilder userList = new StringBuilder("USERLIST:");
 
-        if (!message.isEmpty()) {
-            String selectedUser = (String) userDropdown.getSelectedItem();
-
-            if (selectedUser == null || selectedUser.equals("All")) {
-                output.println(message);
-                chatArea.append("You: " + message + "\n");
-            } else {
-                output.println("PRIVATE:" + selectedUser + ":" + message);
-                chatArea.append("[Private to " + selectedUser + "] You: " + message + "\n");
+            for (String user : clients.keySet()) {
+                userList.append(user).append(",");
             }
 
-            messageField.setText("");
+            for (ClientHandler client : clients.values()) {
+                client.send(userList.toString());
+            }
+        }
+    }
+
+    private void broadcast(String message) {
+        log(message);
+
+        synchronized (clients) {
+            for (ClientHandler client : clients.values()) {
+                client.send(message);
+            }
+        }
+    }
+
+    private void sendPrivate(String sender, String receiver, String message) {
+        synchronized (clients) {
+            ClientHandler target = clients.get(receiver);
+            ClientHandler senderClient = clients.get(sender);
+
+            if (target != null) {
+                String privateMsg = "[PRIVATE] " + sender + " -> " + receiver + ": " + message;
+
+                target.send(privateMsg);
+
+                if (senderClient != null) {
+                    senderClient.send(privateMsg);
+                }
+
+                log(privateMsg);
+            } else {
+                if (senderClient != null) {
+                    senderClient.send("Server: User " + receiver + " is not available.");
+                }
+            }
+        }
+    }
+
+    class ClientHandler extends Thread {
+        private Socket socket;
+        private BufferedReader input;
+        private PrintWriter output;
+        private String username;
+
+        public ClientHandler(Socket socket) {
+            this.socket = socket;
+        }
+
+        public void run() {
+            try {
+                input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                output = new PrintWriter(socket.getOutputStream(), true);
+
+                username = input.readLine();
+
+                synchronized (clients) {
+                    clients.put(username, this);
+                }
+
+                log(username + " connected.");
+                updateUserList();
+                sendUserListToClients();
+
+                broadcast("Server: " + username + " joined the chat.");
+
+                String message;
+
+                while ((message = input.readLine()) != null) {
+                    if (message.startsWith("PRIVATE:")) {
+                        String[] parts = message.split(":", 3);
+
+                        if (parts.length == 3) {
+                            String receiver = parts[1];
+                            String privateText = parts[2];
+
+                            sendPrivate(username, receiver, privateText);
+                        }
+
+                    } else {
+                        broadcast(username + ": " + message);
+                    }
+                }
+
+            } catch (IOException e) {
+                log(username + " disconnected.");
+
+            } finally {
+                try {
+                    synchronized (clients) {
+                        clients.remove(username);
+                    }
+
+                    updateUserList();
+                    sendUserListToClients();
+
+                    broadcast("Server: " + username + " left the chat.");
+
+                    socket.close();
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        public void send(String message) {
+            output.println(message);
         }
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(ChatClient::new);
+        SwingUtilities.invokeLater(ChatServer::new);
     }
 }
