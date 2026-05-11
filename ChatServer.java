@@ -6,7 +6,7 @@ import java.util.*;
 
 public class ChatServer extends JFrame {
 
-    private static final int PORT = 8000;
+    private static final int PORT = 5000;
 
     private JTextArea chatMonitor;
     private JLabel statusLabel;
@@ -15,36 +15,90 @@ public class ChatServer extends JFrame {
     private static final Map<String, ClientHandler> clients = new HashMap<>();
 
     public ChatServer() {
+        setupWindow();
+        setupComponents();
+        startServer();
+
+        setVisible(true);
+    }
+
+    private void setupWindow() {
         setTitle("Chat Server Monitor");
-        setSize(700, 500);
+        setSize(750, 550);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
+        setLayout(new BorderLayout(10, 10));
+        getContentPane().setBackground(new Color(245, 247, 250));
+    }
+
+    private void setupComponents() {
+        Font mainFont = new Font("Segoe UI", Font.PLAIN, 14);
+        Font titleFont = new Font("Segoe UI", Font.BOLD, 18);
+
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.setBackground(new Color(37, 99, 235));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
+
+        JLabel titleLabel = new JLabel("Server Monitor");
+        titleLabel.setFont(titleFont);
+        titleLabel.setForeground(Color.WHITE);
+
+        statusLabel = new JLabel("Server Status: Offline");
+        statusLabel.setFont(mainFont);
+        statusLabel.setForeground(Color.WHITE);
+
+        JLabel portLabel = new JLabel("Port: " + PORT);
+        portLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        portLabel.setForeground(new Color(220, 230, 255));
+
+        JPanel statusPanel = new JPanel(new GridLayout(2, 1));
+        statusPanel.setOpaque(false);
+        statusPanel.add(statusLabel);
+        statusPanel.add(portLabel);
+
+        headerPanel.add(titleLabel, BorderLayout.WEST);
+        headerPanel.add(statusPanel, BorderLayout.EAST);
 
         chatMonitor = new JTextArea();
         chatMonitor.setEditable(false);
+        chatMonitor.setFont(mainFont);
+        chatMonitor.setLineWrap(true);
+        chatMonitor.setWrapStyleWord(true);
+        chatMonitor.setBackground(Color.WHITE);
+        chatMonitor.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
 
-        JScrollPane scrollPane = new JScrollPane(chatMonitor);
-
-        statusLabel = new JLabel("Server Status: Offline");
+        JScrollPane chatScrollPane = new JScrollPane(chatMonitor);
+        chatScrollPane.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 5));
 
         userListModel = new DefaultListModel<>();
         JList<String> onlineUsers = new JList<>(userListModel);
+        onlineUsers.setFont(mainFont);
 
-        JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.add(new JLabel("Online Users"), BorderLayout.NORTH);
-        rightPanel.add(new JScrollPane(onlineUsers), BorderLayout.CENTER);
+        JPanel usersPanel = new JPanel(new BorderLayout());
+        usersPanel.setBackground(Color.WHITE);
+        usersPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        add(statusLabel, BorderLayout.NORTH);
-        add(scrollPane, BorderLayout.CENTER);
-        add(rightPanel, BorderLayout.EAST);
+        JLabel usersLabel = new JLabel("Online Users");
+        usersLabel.setFont(new Font("Segoe UI", Font.BOLD, 15));
+        usersLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 
-        setVisible(true);
-        startServer();
+        usersPanel.add(usersLabel, BorderLayout.NORTH);
+        usersPanel.add(new JScrollPane(onlineUsers), BorderLayout.CENTER);
+        usersPanel.setPreferredSize(new Dimension(180, 0));
+
+        JPanel centerPanel = new JPanel(new BorderLayout());
+        centerPanel.setOpaque(false);
+        centerPanel.add(chatScrollPane, BorderLayout.CENTER);
+        centerPanel.add(usersPanel, BorderLayout.EAST);
+
+        add(headerPanel, BorderLayout.NORTH);
+        add(centerPanel, BorderLayout.CENTER);
     }
 
     private void startServer() {
         new Thread(() -> {
             try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+
                 log("Server started on port " + PORT);
                 statusLabel.setText("Server Status: Online");
 
@@ -62,7 +116,10 @@ public class ChatServer extends JFrame {
     }
 
     private void log(String message) {
-        SwingUtilities.invokeLater(() -> chatMonitor.append(message + "\n"));
+        SwingUtilities.invokeLater(() -> {
+            chatMonitor.append(message + "\n");
+            chatMonitor.setCaretPosition(chatMonitor.getDocument().getLength());
+        });
     }
 
     private void updateUserList() {
