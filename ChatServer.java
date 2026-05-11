@@ -39,20 +39,17 @@ public class ChatServer extends JFrame {
         add(rightPanel, BorderLayout.EAST);
 
         setVisible(true);
-
         startServer();
     }
 
     private void startServer() {
         new Thread(() -> {
             try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-
                 log("Server started on port " + PORT);
                 statusLabel.setText("Server Status: Online");
 
                 while (true) {
                     Socket socket = serverSocket.accept();
-
                     ClientHandler client = new ClientHandler(socket);
                     client.start();
                 }
@@ -65,52 +62,69 @@ public class ChatServer extends JFrame {
     }
 
     private void log(String message) {
-        SwingUtilities.invokeLater(() -> {
-            chatMonitor.append(message + "\n");
-        });
+        SwingUtilities.invokeLater(() -> chatMonitor.append(message + "\n"));
     }
 
     private void updateUserList() {
         SwingUtilities.invokeLater(() -> {
             userListModel.clear();
 
-            for (String user : clients.keySet()) {
-                userListModel.addElement(user);
+            synchronized (clients) {
+                for (String user : clients.keySet()) {
+                    userListModel.addElement(user);
+                }
             }
         });
+    }
+
+    private void sendUserListToClients() {
+        synchronized (clients) {
+            StringBuilder userList = new StringBuilder("USERLIST:");
+
+            for (String user : clients.keySet()) {
+                userList.append(user).append(",");
+            }
+
+            for (ClientHandler client : clients.values()) {
+                client.send(userList.toString());
+            }
+        }
     }
 
     private void broadcast(String message) {
         log(message);
 
-        for (ClientHandler client : clients.values()) {
-            client.send(message);
+        synchronized (clients) {
+            for (ClientHandler client : clients.values()) {
+                client.send(message);
+            }
         }
     }
 
     private void sendPrivate(String sender, String receiver, String message) {
-
-        ClientHandler target = clients.get(receiver);
-
-        if (target != null) {
-
-            String privateMsg =
-                    "[PRIVATE] " + sender + " -> " + receiver + ": " + message;
-
-            target.send(privateMsg);
-
+        synchronized (clients) {
+            ClientHandler target = clients.get(receiver);
             ClientHandler senderClient = clients.get(sender);
 
-            if (senderClient != null) {
-                senderClient.send(privateMsg);
-            }
+            if (target != null) {
+                String privateMsg = "[PRIVATE] " + sender + " -> " + receiver + ": " + message;
 
-            log(privateMsg);
+                target.send(privateMsg);
+
+                if (senderClient != null) {
+                    senderClient.send(privateMsg);
+                }
+
+                log(privateMsg);
+            } else {
+                if (senderClient != null) {
+                    senderClient.send("Server: User " + receiver + " is not available.");
+                }
+            }
         }
     }
 
     class ClientHandler extends Thread {
-
         private Socket socket;
         private BufferedReader input;
         private PrintWriter output;
@@ -121,14 +135,9 @@ public class ChatServer extends JFrame {
         }
 
         public void run() {
-
             try {
-
-                input = new BufferedReader(
-                        new InputStreamReader(socket.getInputStream()));
-
-                output = new PrintWriter(
-                        socket.getOutputStream(), true);
+                input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                output = new PrintWriter(socket.getOutputStream(), true);
 
                 username = input.readLine();
 
@@ -138,44 +147,39 @@ public class ChatServer extends JFrame {
 
                 log(username + " connected.");
                 updateUserList();
+                sendUserListToClients();
 
                 broadcast("Server: " + username + " joined the chat.");
 
                 String message;
 
                 while ((message = input.readLine()) != null) {
-
                     if (message.startsWith("PRIVATE:")) {
-
                         String[] parts = message.split(":", 3);
 
-                        String receiver = parts[1];
-                        String privateText = parts[2];
+                        if (parts.length == 3) {
+                            String receiver = parts[1];
+                            String privateText = parts[2];
 
-                        sendPrivate(username, receiver, privateText);
+                            sendPrivate(username, receiver, privateText);
+                        }
 
                     } else {
-
-                        String fullMessage =
-                                username + ": " + message;
-
-                        broadcast(fullMessage);
+                        broadcast(username + ": " + message);
                     }
                 }
 
             } catch (IOException e) {
-
                 log(username + " disconnected.");
 
             } finally {
-
                 try {
-
                     synchronized (clients) {
                         clients.remove(username);
                     }
 
                     updateUserList();
+                    sendUserListToClients();
 
                     broadcast("Server: " + username + " left the chat.");
 
@@ -193,9 +197,6 @@ public class ChatServer extends JFrame {
     }
 
     public static void main(String[] args) {
-
-        SwingUtilities.invokeLater(() -> {
-            new ChatServer();
-        });
+        SwingUtilities.invokeLater(ChatServer::new);
     }
 }
