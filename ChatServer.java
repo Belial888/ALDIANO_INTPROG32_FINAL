@@ -1,22 +1,40 @@
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
-import java.net.*;
-import java.util.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.Set;
 
 public class ChatServer extends JFrame {
 
     private static final int PORT = 5000;
+    private static final String HISTORY_FILE = "chat_history.txt";
 
-    private JTextArea chatMonitor;
+    private final Map<String, ClientHandler> clients =
+            Collections.synchronizedMap(new LinkedHashMap<String, ClientHandler>());
+
+    private final Map<String, Set<String>> rooms =
+            Collections.synchronizedMap(new LinkedHashMap<String, Set<String>>());
+
+    private JTextArea monitorArea;
     private JLabel statusLabel;
+    private JLabel portLabel;
+    private JLabel threadCountLabel;
     private DefaultListModel<String> userListModel;
-
-    private static final Map<String, ClientHandler> clients = new HashMap<>();
+    private DefaultListModel<String> threadListModel;
 
     public ChatServer() {
+        rooms.put("General", new LinkedHashSet<String>());
+
         setupWindow();
-        setupComponents();
+        setupUI();
         startServer();
 
         setVisible(true);
@@ -24,168 +42,249 @@ public class ChatServer extends JFrame {
 
     private void setupWindow() {
         setTitle("Chat Server Monitor");
-        setSize(750, 550);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(800, 560);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout(10, 10));
-        getContentPane().setBackground(new Color(245, 247, 250));
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLayout(new BorderLayout(8, 8));
     }
 
-    private void setupComponents() {
-        Font mainFont = new Font("Segoe UI", Font.PLAIN, 14);
-        Font titleFont = new Font("Segoe UI", Font.BOLD, 18);
+    private void setupUI() {
+        JPanel topPanel = new JPanel(new GridLayout(3, 1, 3, 3));
+        topPanel.setBorder(BorderFactory.createEmptyBorder(10, 12, 8, 12));
 
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBackground(new Color(37, 99, 235));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
-
-        JLabel titleLabel = new JLabel("Server Monitor");
-        titleLabel.setFont(titleFont);
-        titleLabel.setForeground(Color.WHITE);
+        JLabel titleLabel = new JLabel("Chat Server Monitor");
+        titleLabel.setFont(new Font("SansSerif", Font.BOLD, 18));
 
         statusLabel = new JLabel("Server Status: Offline");
-        statusLabel.setFont(mainFont);
-        statusLabel.setForeground(Color.WHITE);
+        portLabel = new JLabel("Server Port: " + PORT);
+        threadCountLabel = new JLabel("Active Threads: 0");
 
-        JLabel portLabel = new JLabel("Port: " + PORT);
-        portLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        portLabel.setForeground(new Color(220, 230, 255));
+        JPanel infoPanel = new JPanel(new GridLayout(1, 3, 8, 8));
+        infoPanel.add(statusLabel);
+        infoPanel.add(portLabel);
+        infoPanel.add(threadCountLabel);
 
-        JPanel statusPanel = new JPanel(new GridLayout(2, 1));
-        statusPanel.setOpaque(false);
-        statusPanel.add(statusLabel);
-        statusPanel.add(portLabel);
+        topPanel.add(titleLabel);
+        topPanel.add(infoPanel);
+        topPanel.add(new JSeparator());
 
-        headerPanel.add(titleLabel, BorderLayout.WEST);
-        headerPanel.add(statusPanel, BorderLayout.EAST);
+        monitorArea = new JTextArea();
+        monitorArea.setEditable(false);
+        monitorArea.setLineWrap(true);
+        monitorArea.setWrapStyleWord(true);
+        monitorArea.setMargin(new Insets(8, 8, 8, 8));
 
-        chatMonitor = new JTextArea();
-        chatMonitor.setEditable(false);
-        chatMonitor.setFont(mainFont);
-        chatMonitor.setLineWrap(true);
-        chatMonitor.setWrapStyleWord(true);
-        chatMonitor.setBackground(Color.WHITE);
-        chatMonitor.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 15));
+        JScrollPane monitorScroll = new JScrollPane(monitorArea);
+        monitorScroll.setBorder(BorderFactory.createTitledBorder("Server Logs"));
 
-        JScrollPane chatScrollPane = new JScrollPane(chatMonitor);
-        chatScrollPane.setBorder(BorderFactory.createEmptyBorder(15, 15, 15, 5));
+        userListModel = new DefaultListModel<String>();
+        JList<String> userList = new JList<String>(userListModel);
 
-        userListModel = new DefaultListModel<>();
-        JList<String> onlineUsers = new JList<>(userListModel);
-        onlineUsers.setFont(mainFont);
+        threadListModel = new DefaultListModel<String>();
+        JList<String> threadList = new JList<String>(threadListModel);
 
-        JPanel usersPanel = new JPanel(new BorderLayout());
-        usersPanel.setBackground(Color.WHITE);
-        usersPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JPanel rightPanel = new JPanel(new GridLayout(2, 1, 8, 8));
+        rightPanel.setPreferredSize(new Dimension(250, 0));
+        rightPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 8, 8));
 
-        JLabel usersLabel = new JLabel("Online Users");
-        usersLabel.setFont(new Font("Segoe UI", Font.BOLD, 15));
-        usersLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        rightPanel.add(wrapInPanel("Connected Users", new JScrollPane(userList)));
+        rightPanel.add(wrapInPanel("Active Threads", new JScrollPane(threadList)));
 
-        usersPanel.add(usersLabel, BorderLayout.NORTH);
-        usersPanel.add(new JScrollPane(onlineUsers), BorderLayout.CENTER);
-        usersPanel.setPreferredSize(new Dimension(180, 0));
+        add(topPanel, BorderLayout.NORTH);
+        add(monitorScroll, BorderLayout.CENTER);
+        add(rightPanel, BorderLayout.EAST);
+    }
 
-        JPanel centerPanel = new JPanel(new BorderLayout());
-        centerPanel.setOpaque(false);
-        centerPanel.add(chatScrollPane, BorderLayout.CENTER);
-        centerPanel.add(usersPanel, BorderLayout.EAST);
-
-        add(headerPanel, BorderLayout.NORTH);
-        add(centerPanel, BorderLayout.CENTER);
+    private JPanel wrapInPanel(String title, Component component) {
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.setBorder(BorderFactory.createTitledBorder(title));
+        panel.add(component, BorderLayout.CENTER);
+        return panel;
     }
 
     private void startServer() {
-        new Thread(() -> {
-            try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+        Thread serverThread = new Thread(new Runnable() {
+            public void run() {
+                try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+                    updateStatus("Server Status: Online");
+                    log("Server started on port " + PORT);
 
-                log("Server started on port " + PORT);
-                statusLabel.setText("Server Status: Online");
+                    while (true) {
+                        Socket socket = serverSocket.accept();
+                        ClientHandler handler = new ClientHandler(socket);
+                        handler.start();
+                    }
 
-                while (true) {
-                    Socket socket = serverSocket.accept();
-                    ClientHandler client = new ClientHandler(socket);
-                    client.start();
-                }
-
-            } catch (IOException e) {
-                log("Server error: " + e.getMessage());
-                statusLabel.setText("Server Status: Offline");
-            }
-        }).start();
-    }
-
-    private void log(String message) {
-        SwingUtilities.invokeLater(() -> {
-            chatMonitor.append(message + "\n");
-            chatMonitor.setCaretPosition(chatMonitor.getDocument().getLength());
-        });
-    }
-
-    private void updateUserList() {
-        SwingUtilities.invokeLater(() -> {
-            userListModel.clear();
-
-            synchronized (clients) {
-                for (String user : clients.keySet()) {
-                    userListModel.addElement(user);
+                } catch (IOException e) {
+                    updateStatus("Server Status: Offline");
+                    log("Server error: " + e.getMessage());
                 }
             }
         });
+
+        serverThread.setName("Server-Acceptor-Thread");
+        serverThread.start();
     }
 
-    private void sendUserListToClients() {
-        synchronized (clients) {
-            StringBuilder userList = new StringBuilder("USERLIST:");
+    private boolean validateLogin(String username, String password) {
+        return username != null
+                && username.trim().length() > 0
+                && password != null
+                && password.equals("1234")
+                && !clients.containsKey(username);
+    }
 
-            for (String user : clients.keySet()) {
-                userList.append(user).append(",");
+    private String timeNow() {
+        return new SimpleDateFormat("hh:mm a").format(new Date());
+    }
+
+    private void log(final String message) {
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                monitorArea.append(message + "\n");
+                monitorArea.setCaretPosition(monitorArea.getDocument().getLength());
             }
+        });
+    }
+
+    private void updateStatus(final String status) {
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                statusLabel.setText(status);
+            }
+        });
+    }
+
+    private void updateAdminLists() {
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                userListModel.clear();
+                threadListModel.clear();
+
+                synchronized (clients) {
+                    for (Map.Entry<String, ClientHandler> entry : clients.entrySet()) {
+                        userListModel.addElement(entry.getKey());
+                        threadListModel.addElement(entry.getValue().getName());
+                    }
+
+                    threadCountLabel.setText("Active Threads: " + clients.size());
+                }
+            }
+        });
+    }
+
+    private void saveHistory(String message) {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(HISTORY_FILE, true))) {
+            writer.println(message);
+        } catch (IOException e) {
+            log("History save error: " + e.getMessage());
+        }
+    }
+
+    private ArrayList<String> loadHistory() {
+        ArrayList<String> history = new ArrayList<String>();
+        File file = new File(HISTORY_FILE);
+
+        if (!file.exists()) {
+            return history;
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                history.add(line);
+            }
+        } catch (IOException e) {
+            log("History load error: " + e.getMessage());
+        }
+
+        return history;
+    }
+
+    private void sendUserListToAll() {
+        ChatPacket packet = new ChatPacket(ChatPacket.Type.USER_LIST);
+
+        synchronized (clients) {
+            packet.users.addAll(clients.keySet());
 
             for (ClientHandler client : clients.values()) {
-                client.send(userList.toString());
+                client.send(packet);
             }
         }
     }
 
-    private void broadcast(String message) {
-        log(message);
+    private void sendRoomListToAll() {
+        ChatPacket packet = new ChatPacket(ChatPacket.Type.ROOM_LIST);
+
+        synchronized (rooms) {
+            packet.rooms.addAll(rooms.keySet());
+        }
 
         synchronized (clients) {
             for (ClientHandler client : clients.values()) {
-                client.send(message);
+                client.send(packet);
             }
         }
     }
 
-    private void sendPrivate(String sender, String receiver, String message) {
-        synchronized (clients) {
-            ClientHandler target = clients.get(receiver);
-            ClientHandler senderClient = clients.get(sender);
+    private void sendToRoom(String room, ChatPacket packet) {
+        synchronized (rooms) {
+            Set<String> members = rooms.get(room);
 
-            if (target != null) {
-                String privateMsg = "[PRIVATE] " + sender + " -> " + receiver + ": " + message;
+            if (members == null) {
+                return;
+            }
 
-                target.send(privateMsg);
+            for (String user : members) {
+                ClientHandler client = clients.get(user);
 
-                if (senderClient != null) {
-                    senderClient.send(privateMsg);
-                }
-
-                log(privateMsg);
-            } else {
-                if (senderClient != null) {
-                    senderClient.send("Server: User " + receiver + " is not available.");
+                if (client != null) {
+                    client.send(packet);
                 }
             }
         }
+    }
+
+    private void sendToRoomExcept(String room, String excludedUser, ChatPacket packet) {
+        synchronized (rooms) {
+            Set<String> members = rooms.get(room);
+
+            if (members == null) {
+                return;
+            }
+
+            for (String user : members) {
+                if (!user.equals(excludedUser)) {
+                    ClientHandler client = clients.get(user);
+
+                    if (client != null) {
+                        client.send(packet);
+                    }
+                }
+            }
+        }
+    }
+
+    private void systemMessageToRoom(String room, String message) {
+        String fullMessage = "[" + timeNow() + "] Server: " + message;
+
+        ChatPacket packet = new ChatPacket(ChatPacket.Type.SYSTEM);
+        packet.message = fullMessage;
+        packet.room = room;
+
+        log(fullMessage);
+        saveHistory(fullMessage);
+        sendToRoom(room, packet);
     }
 
     class ClientHandler extends Thread {
+
         private Socket socket;
-        private BufferedReader input;
-        private PrintWriter output;
-        private String username;
+        private ObjectOutputStream output;
+        private ObjectInputStream input;
+        private String username = "";
+        private String currentRoom = "General";
+        private boolean disconnected = false;
 
         public ClientHandler(Socket socket) {
             this.socket = socket;
@@ -193,67 +292,311 @@ public class ChatServer extends JFrame {
 
         public void run() {
             try {
-                input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                output = new PrintWriter(socket.getOutputStream(), true);
+                output = new ObjectOutputStream(socket.getOutputStream());
+                output.flush();
+                input = new ObjectInputStream(socket.getInputStream());
 
-                username = input.readLine();
-
-                synchronized (clients) {
-                    clients.put(username, this);
-                }
-
-                log(username + " connected.");
-                updateUserList();
-                sendUserListToClients();
-
-                broadcast("Server: " + username + " joined the chat.");
-
-                String message;
-
-                while ((message = input.readLine()) != null) {
-                    if (message.startsWith("PRIVATE:")) {
-                        String[] parts = message.split(":", 3);
-
-                        if (parts.length == 3) {
-                            String receiver = parts[1];
-                            String privateText = parts[2];
-
-                            sendPrivate(username, receiver, privateText);
-                        }
-
-                    } else {
-                        broadcast(username + ": " + message);
-                    }
+                while (true) {
+                    ChatPacket packet = (ChatPacket) input.readObject();
+                    handlePacket(packet);
                 }
 
             } catch (IOException e) {
-                log(username + " disconnected.");
+                disconnectClient();
+            } catch (ClassNotFoundException e) {
+                disconnectClient();
+            }
+        }
 
-            } finally {
-                try {
-                    synchronized (clients) {
-                        clients.remove(username);
+        private void handlePacket(ChatPacket packet) {
+            if (packet == null || packet.type == null) {
+                return;
+            }
+
+            switch (packet.type) {
+                case LOGIN:
+                    handleLogin(packet);
+                    break;
+
+                case MESSAGE:
+                    handlePublicMessage(packet.message);
+                    break;
+
+                case PRIVATE_MESSAGE:
+                    handlePrivateMessage(packet.receiver, packet.message);
+                    break;
+
+                case ECHO:
+                    handleEcho(packet.message);
+                    break;
+
+                case CREATE_ROOM:
+                    handleCreateRoom(packet.room);
+                    break;
+
+                case JOIN_ROOM:
+                    handleJoinRoom(packet.room);
+                    break;
+
+                case LEAVE_ROOM:
+                    handleJoinRoom("General");
+                    break;
+
+                case TYPING:
+                    handleTyping();
+                    break;
+
+                case FILE_DATA:
+                    handleFileTransfer(packet);
+                    break;
+
+                default:
+                    break;
+            }
+        }
+
+        private void handleLogin(ChatPacket packet) {
+            ChatPacket response = new ChatPacket(ChatPacket.Type.LOGIN_RESPONSE);
+            String requestedUsername = packet.username.trim();
+
+            synchronized (clients) {
+                if (validateLogin(requestedUsername, packet.password)) {
+                    username = requestedUsername;
+                    clients.put(username, this);
+
+                    synchronized (rooms) {
+                        rooms.get("General").add(username);
                     }
 
-                    updateUserList();
-                    sendUserListToClients();
+                    setName("Thread-" + getId() + " handles " + username);
 
-                    broadcast("Server: " + username + " left the chat.");
+                    response.success = true;
+                    response.message = "Login successful.";
+                    send(response);
 
-                    socket.close();
+                    ChatPacket historyPacket = new ChatPacket(ChatPacket.Type.HISTORY);
+                    historyPacket.history.addAll(loadHistory());
+                    send(historyPacket);
 
-                } catch (IOException e) {
-                    e.printStackTrace();
+                    sendRoomListToAll();
+                    sendUserListToAll();
+                    updateAdminLists();
+
+                    log(username + " connected.");
+                    systemMessageToRoom("General", username + " joined the chat.");
+
+                } else {
+                    response.success = false;
+                    response.message = "Invalid login. Use password 1234 or choose another username.";
+                    send(response);
                 }
             }
         }
 
-        public void send(String message) {
-            output.println(message);
+        private void handlePublicMessage(String message) {
+            String fullMessage = "[" + timeNow() + "] " + username + ": " + message;
+
+            ChatPacket packet = new ChatPacket(ChatPacket.Type.MESSAGE);
+            packet.username = username;
+            packet.room = currentRoom;
+            packet.message = fullMessage;
+
+            log(fullMessage);
+            saveHistory(fullMessage);
+            sendToRoom(currentRoom, packet);
+        }
+
+        private void handlePrivateMessage(String receiver, String message) {
+            String fullMessage = "[" + timeNow() + "] [PRIVATE] "
+                    + username + " -> " + receiver + ": " + message;
+
+            ChatPacket packet = new ChatPacket(ChatPacket.Type.PRIVATE_MESSAGE);
+            packet.username = username;
+            packet.receiver = receiver;
+            packet.message = fullMessage;
+
+            synchronized (clients) {
+                ClientHandler target = clients.get(receiver);
+                ClientHandler sender = clients.get(username);
+
+                if (target != null) {
+                    target.send(packet);
+
+                    if (sender != null) {
+                        sender.send(packet);
+                    }
+
+                    log(fullMessage);
+                    saveHistory(fullMessage);
+
+                } else if (sender != null) {
+                    ChatPacket error = new ChatPacket(ChatPacket.Type.SYSTEM);
+                    error.message = "[" + timeNow() + "] Server: User is not available.";
+                    sender.send(error);
+                }
+            }
+        }
+
+        private void handleEcho(String message) {
+            String echoMessage = "[" + timeNow() + "] Server: " + message;
+
+            ChatPacket packet = new ChatPacket(ChatPacket.Type.ECHO);
+            packet.message = echoMessage;
+
+            log("[ECHO] " + username + " -> Server: " + message);
+            send(packet);
+        }
+
+        private void handleCreateRoom(String roomName) {
+            if (roomName == null || roomName.trim().length() == 0) {
+                return;
+            }
+
+            roomName = roomName.trim();
+
+            synchronized (rooms) {
+                if (!rooms.containsKey(roomName)) {
+                    rooms.put(roomName, new LinkedHashSet<String>());
+                }
+            }
+
+            handleJoinRoom(roomName);
+            sendRoomListToAll();
+        }
+
+        private void handleJoinRoom(String newRoom) {
+            if (newRoom == null || newRoom.trim().length() == 0) {
+                return;
+            }
+
+            newRoom = newRoom.trim();
+
+            synchronized (rooms) {
+                if (!rooms.containsKey(newRoom)) {
+                    rooms.put(newRoom, new LinkedHashSet<String>());
+                }
+
+                Set<String> oldMembers = rooms.get(currentRoom);
+                if (oldMembers != null) {
+                    oldMembers.remove(username);
+                }
+
+                currentRoom = newRoom;
+                rooms.get(currentRoom).add(username);
+            }
+
+            ChatPacket packet = new ChatPacket(ChatPacket.Type.SYSTEM);
+            packet.message = "[" + timeNow() + "] Server: You joined room " + currentRoom;
+            packet.room = currentRoom;
+            send(packet);
+
+            systemMessageToRoom(currentRoom, username + " is now in room " + currentRoom + ".");
+            sendRoomListToAll();
+        }
+
+        private void handleTyping() {
+            ChatPacket packet = new ChatPacket(ChatPacket.Type.TYPING);
+            packet.username = username;
+            packet.room = currentRoom;
+            packet.message = username + " is typing...";
+
+            sendToRoomExcept(currentRoom, username, packet);
+        }
+
+        private void handleFileTransfer(ChatPacket packet) {
+            String fullMessage = "[" + timeNow() + "] Server: "
+                    + username + " sent a file: " + packet.fileName;
+
+            ChatPacket filePacket = new ChatPacket(ChatPacket.Type.FILE_DATA);
+            filePacket.username = username;
+            filePacket.receiver = packet.receiver;
+            filePacket.room = currentRoom;
+            filePacket.fileName = packet.fileName;
+            filePacket.fileData = packet.fileData;
+            filePacket.message = fullMessage;
+
+            if (packet.receiver == null || packet.receiver.equals("All")) {
+                sendToRoomExcept(currentRoom, username, filePacket);
+            } else {
+                ClientHandler target = clients.get(packet.receiver);
+
+                if (target != null) {
+                    target.send(filePacket);
+                }
+            }
+
+            ChatPacket senderNotice = new ChatPacket(ChatPacket.Type.SYSTEM);
+            senderNotice.message = fullMessage;
+            send(senderNotice);
+
+            log(fullMessage);
+            saveHistory(fullMessage);
+        }
+
+        private void disconnectClient() {
+            if (disconnected) {
+                return;
+            }
+
+            disconnected = true;
+
+            if (username == null || username.length() == 0) {
+                closeSocket();
+                return;
+            }
+
+            synchronized (clients) {
+                clients.remove(username);
+            }
+
+            synchronized (rooms) {
+                Set<String> members = rooms.get(currentRoom);
+                if (members != null) {
+                    members.remove(username);
+                }
+            }
+
+            log(username + " disconnected.");
+            systemMessageToRoom(currentRoom, username + " left the chat.");
+
+            sendUserListToAll();
+            sendRoomListToAll();
+            updateAdminLists();
+            closeSocket();
+        }
+
+        private void closeSocket() {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                log("Socket close error: " + e.getMessage());
+            }
+        }
+
+        public synchronized void send(ChatPacket packet) {
+            try {
+                if (output != null) {
+                    output.writeObject(packet);
+                    output.flush();
+                    output.reset();
+                }
+            } catch (IOException e) {
+                disconnectClient();
+            }
         }
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(ChatServer::new);
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception e) {
+            // Use default Java look and feel if system look and feel is unavailable.
+        }
+
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                new ChatServer();
+            }
+        });
     }
 }
